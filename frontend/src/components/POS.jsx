@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Search, X, Scan, LayoutGrid, Smartphone, Tag, ShoppingBag, Box, Plus, Layers, Store, UserCheck, Trash2, ShoppingCart, Minus, Banknote, CreditCard, Wallet, ArrowLeftRight, CheckCircle, PlusCircle, Edit2, Save, BarChart3, DollarSign, TrendingUp, Receipt } from 'lucide-react';
+import { Search, X, LayoutGrid, Smartphone, Tag, ShoppingBag, Box, Plus, Store, UserCheck, Trash2, ShoppingCart, Minus, Banknote, CreditCard, Wallet, ArrowLeftRight, CheckCircle, PlusCircle, Edit2, Save, BarChart3, DollarSign, TrendingUp, Receipt, LogOut, UserPlus } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { ReceiptTemplate } from './ReceiptTemplate';
 
@@ -15,10 +15,10 @@ const formatCurrency = (val) => {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val || 0);
 };
 
-export default function POS() {
+export default function POS({ user, token, onLogout }) {
   // --- NAVEGACIÓN ENTRE VISTAS ---
-  const [activeView, setActiveView] = useState('pos'); // 'pos' o 'dashboard'
-  const [lastSale, setLastSale] = useState(null); // <--- CORREGIDO: Movido adentro del componente
+  const [activeView, setActiveView] = useState('pos');
+  const [lastSale, setLastSale] = useState(null);
 
   // --- ESTADOS DE POS ---
   const [searchQuery, setSearchQuery] = useState('');
@@ -27,6 +27,7 @@ export default function POS() {
   const [selectedPayment, setSelectedPayment] = useState('efectivo');
   const [lastAddedSku, setLastAddedSku] = useState(null);
   const searchInputRef = useRef(null);
+  const isAdmin = user?.role === 'admin';
 
   // --- ESTADOS DE PRODUCTOS Y VENTAS ---
   const [products, setProducts] = useState([]);
@@ -34,11 +35,19 @@ export default function POS() {
   const [salesHistory, setSalesHistory] = useState([]);
   const [loadingSales, setLoadingSales] = useState(false);
 
-  // --- ESTADOS DEL CRUD (MODAL) ---
+  // --- ESTADOS DEL CRUD DE PRODUCTOS (MODAL) ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [formData, setFormData] = useState({
     sku: '', name: '', category: 'Electrónica', base_price: '', stock: ''
+  });
+
+  // --- ESTADOS DE REGISTRO DE USUARIOS (MODAL) ---
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [userFormData, setUserFormData] = useState({
+    username: '',
+    password: '',
+    role: 'cajero'
   });
 
   // --- PETICIONES AL BACKEND ---
@@ -55,7 +64,9 @@ export default function POS() {
   const fetchSalesHistory = async () => {
     setLoadingSales(true);
     try {
-      const response = await fetch('http://localhost:3000/api/sales');
+      const response = await fetch('http://localhost:3000/api/sales', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const data = await response.json();
       setSalesHistory(data.data || []);
     } catch (error) {
@@ -70,14 +81,53 @@ export default function POS() {
   }, []);
 
   const handleSwitchView = (view) => {
+    if (view === 'dashboard' && !isAdmin) return;
     setActiveView(view);
     if (view === 'dashboard') {
       fetchSalesHistory();
     }
   };
 
+  // --- FUNCIONES DE REGISTRO DE USUARIOS ---
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    if (!isAdmin) return;
+
+    try {
+      const response = await fetch('http://localhost:3000/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(userFormData)
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setIsUserModalOpen(false);
+        setUserFormData({ username: '', password: '', role: 'cajero' });
+        Swal.fire({
+          title: '¡Usuario Creado!',
+          text: `Cuenta "${data.user.username}" (${data.user.role}) lista para usarse.`,
+          icon: 'success',
+          confirmButtonColor: '#059669',
+          timer: 1800,
+          showConfirmButton: false
+        });
+      } else {
+        Swal.fire('Error', data.message || 'No se pudo crear el usuario.', 'error');
+      }
+    } catch (error) {
+      console.error('Error al registrar usuario:', error);
+      Swal.fire('Error', 'No se pudo conectar con el servidor.', 'error');
+    }
+  };
+
   // --- FUNCIONES DEL CRUD DE PRODUCTOS ---
   const handleOpenModal = (product = null) => {
+    if (!isAdmin) return;
     if (product) {
       setEditingProduct(product);
       setFormData({
@@ -109,7 +159,10 @@ export default function POS() {
     try {
       const response = await fetch(url, {
         method: isEditing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(formData)
       });
       
@@ -124,6 +177,9 @@ export default function POS() {
           timer: 1500,
           showConfirmButton: false
         });
+      } else {
+        const errData = await response.json();
+        Swal.fire('Error', errData.message || 'No tienes permisos para realizar esta acción.', 'error');
       }
     } catch (error) {
       console.error('Error al guardar:', error);
@@ -132,6 +188,7 @@ export default function POS() {
 
   const handleDelete = async (id, e) => {
     e.stopPropagation(); 
+    if (!isAdmin) return;
     
     const result = await Swal.fire({
       title: '¿Eliminar producto?',
@@ -147,7 +204,10 @@ export default function POS() {
     if (result.isConfirmed) {
       try {
         const response = await fetch(`http://localhost:3000/api/products/${id}`, {
-          method: 'DELETE'
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
         });
         if (response.ok) {
           fetchProducts();
@@ -159,6 +219,9 @@ export default function POS() {
             timer: 1500,
             showConfirmButton: false
           });
+        } else {
+          const errData = await response.json();
+          Swal.fire('Error', errData.message || 'No se pudo eliminar el producto.', 'error');
         }
       } catch (error) {
         console.error('Error al eliminar:', error);
@@ -232,7 +295,7 @@ export default function POS() {
 
     const salePayload = {
       receipt_folio: `TK-${Math.floor(Math.random() * 1000000)}`,
-      cashier_id: "CAJERO-01",
+      cashier_id: user?.username || 'Cajero',
       items: cart.map(item => ({
         product_id: item.product._id,
         sku: item.product.sku,
@@ -250,17 +313,21 @@ export default function POS() {
     try {
       const response = await fetch('http://localhost:3000/api/sales', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(salePayload)
       });
 
       if (response.ok) {
-  setLastSale(salePayload); // Esto abre automáticamente el modal con el ticket detallado
-
-  fetchProducts(); 
-  setCart([]);
-  searchQuery && setSearchQuery('');
-}
+        setLastSale(salePayload);
+        fetchProducts(); 
+        setCart([]);
+        if (searchQuery) setSearchQuery('');
+      } else {
+        Swal.fire('Error', 'No se pudo procesar la venta. Verifica tu sesión.', 'error');
+      }
     } catch (error) {
       console.error('Error al conectar con la API de ventas:', error);
     }
@@ -280,7 +347,7 @@ export default function POS() {
           <>
             <section className="w-[70%] flex flex-col h-full border-r border-slate-200/80 bg-slate-50/60 overflow-hidden">
               <header className="p-5 pb-4 bg-white border-b border-slate-200/90 shadow-sm shrink-0">
-                <div className="flex items-center justify-between gap-4 mb-4">
+                <div className="flex items-center justify-between gap-3 mb-4">
                   
                   <div className="relative flex-1">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400"><Search className="w-5 h-5" /></div>
@@ -290,30 +357,41 @@ export default function POS() {
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Escanear código de barra (SKU) o buscar producto..."
-                      className="w-full pl-11 pr-24 py-2.5 bg-slate-100 hover:bg-slate-50 focus:bg-white text-slate-800 rounded-xl outline-none border border-transparent focus:border-emerald-500 transition-colors"
+                      className="w-full pl-11 pr-10 py-2.5 bg-slate-100 hover:bg-slate-50 focus:bg-white text-slate-800 rounded-xl outline-none border border-transparent focus:border-emerald-500 transition-colors"
                     />
                     {searchQuery && (
-                      <button onClick={() => setSearchQuery('')} className="absolute right-10 top-1/2 -translate-y-1/2 text-slate-400 p-1"><X className="w-4 h-4" /></button>
+                      <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 p-1"><X className="w-4 h-4" /></button>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => handleSwitchView('dashboard')} 
-                      className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm"
-                    >
-                      <BarChart3 className="w-4 h-4 text-emerald-400" />
-                      Dashboard / Ventas
-                    </button>
+                  {/* BOTONES EXCLUSIVOS DE ADMINISTRADOR */}
+                  {isAdmin && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button 
+                        onClick={() => handleSwitchView('dashboard')} 
+                        className="bg-slate-800 hover:bg-slate-700 text-white px-3.5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm"
+                      >
+                        <BarChart3 className="w-4 h-4 text-emerald-400" />
+                        Dashboard
+                      </button>
 
-                    <button 
-                      onClick={() => handleOpenModal()} 
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm shadow-emerald-600/30"
-                    >
-                      <PlusCircle className="w-4 h-4" />
-                      Nuevo Producto
-                    </button>
-                  </div>
+                      <button 
+                        onClick={() => setIsUserModalOpen(true)} 
+                        className="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        Nuevo Usuario
+                      </button>
+
+                      <button 
+                        onClick={() => handleOpenModal()} 
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm shadow-emerald-600/30"
+                      >
+                        <PlusCircle className="w-4 h-4" />
+                        Nuevo Producto
+                      </button>
+                    </div>
+                  )}
 
                 </div>
                 
@@ -346,16 +424,19 @@ export default function POS() {
                       <div 
                         key={prod._id} 
                         onClick={() => handleAddToCart(prod)} 
-                        className={`group bg-white rounded-2xl border p-3.5 cursor-pointer transition-all relative ${prod.stock <= 0 ? 'opacity-50' : 'hover:shadow-lg hover:border-emerald-500/40'}`}
+                        className={`group bg-white rounded-2xl border p-3.5 cursor-pointer transition-all relative ${lastAddedSku === prod.sku ? 'ring-2 ring-emerald-500' : ''} ${prod.stock <= 0 ? 'opacity-50' : 'hover:shadow-lg hover:border-emerald-500/40'}`}
                       >
-                        <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                          <button onClick={(e) => { e.stopPropagation(); handleOpenModal(prod); }} className="p-1.5 bg-white text-blue-600 rounded-lg shadow hover:bg-blue-50">
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={(e) => handleDelete(prod._id, e)} className="p-1.5 bg-white text-rose-600 rounded-lg shadow hover:bg-rose-50">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {/* ACCIONES DE EDICIÓN SOLO PARA ADMIN */}
+                        {isAdmin && (
+                          <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                            <button onClick={(e) => { e.stopPropagation(); handleOpenModal(prod); }} className="p-1.5 bg-white text-blue-600 rounded-lg shadow hover:bg-blue-50">
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={(e) => handleDelete(prod._id, e)} className="p-1.5 bg-white text-rose-600 rounded-lg shadow hover:bg-rose-50">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
 
                         <div className="relative aspect-square rounded-xl bg-slate-100 flex items-center justify-center mb-3">
                           <Box className="w-6 h-6 text-slate-400" />
@@ -374,14 +455,23 @@ export default function POS() {
             {/* CAJA REGISTRADORA */}
             <aside className="w-[30%] flex flex-col h-full bg-white shadow-xl z-20">
               <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
-                <div className="flex gap-3">
+                <div className="flex gap-3 items-center">
                   <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center"><Store className="w-5 h-5"/></div>
                   <div>
                     <h2 className="text-sm font-bold">Caja Principal</h2>
-                    <p className="text-xs text-slate-500 flex items-center gap-1"><UserCheck className="w-3.5 h-3.5 text-emerald-600"/> Cajero: Admin</p>
+                    <p className="text-xs text-slate-500 flex items-center gap-1 capitalize">
+                      <UserCheck className="w-3.5 h-3.5 text-emerald-600"/> {user?.username} ({user?.role})
+                    </p>
                   </div>
                 </div>
-                <button onClick={handleClearCart} disabled={cart.length === 0} className="p-2 text-slate-400 hover:text-rose-600"><Trash2 className="w-4 h-4"/></button>
+                <div className="flex items-center gap-1">
+                  <button onClick={handleClearCart} disabled={cart.length === 0} title="Vaciar Ticket" className="p-2 text-slate-400 hover:text-rose-600 disabled:opacity-40">
+                    <Trash2 className="w-4 h-4"/>
+                  </button>
+                  <button onClick={onLogout} title="Cerrar Sesión" className="p-2 text-slate-400 hover:text-slate-700">
+                    <LogOut className="w-4 h-4"/>
+                  </button>
+                </div>
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 divide-y">
@@ -437,8 +527,8 @@ export default function POS() {
           </>
         )}
 
-        {/* VISTA 2: DASHBOARD E HISTORIAL DE VENTAS */}
-        {activeView === 'dashboard' && (
+        {/* VISTA 2: DASHBOARD E HISTORIAL DE VENTAS (SOLO ADMIN) */}
+        {activeView === 'dashboard' && isAdmin && (
           <main className="flex-1 flex flex-col h-full bg-slate-100 overflow-hidden">
             <header className="p-6 bg-white border-b flex justify-between items-center shadow-sm">
               <div>
@@ -495,6 +585,7 @@ export default function POS() {
                       <thead>
                         <tr className="bg-slate-50 text-slate-400 border-b font-semibold uppercase tracking-wider">
                           <th className="p-4">Folio</th>
+                          <th className="p-4">Cajero</th>
                           <th className="p-4">Fecha y Hora</th>
                           <th className="p-4">Método de Pago</th>
                           <th className="p-4">Artículos</th>
@@ -505,6 +596,7 @@ export default function POS() {
                         {salesHistory.map((sale) => (
                           <tr key={sale._id} className="hover:bg-slate-50/80 transition-colors">
                             <td className="p-4 font-mono font-bold text-emerald-600">{sale.receipt_folio}</td>
+                            <td className="p-4 font-semibold text-slate-700">{sale.cashier_id || 'N/A'}</td>
                             <td className="p-4 text-slate-500">{new Date(sale.createdAt || sale.date).toLocaleString()}</td>
                             <td className="p-4 uppercase font-semibold">
                               <span className="px-2.5 py-1 rounded-full bg-slate-100 border text-[10px]">{sale.payment_method}</span>
@@ -522,8 +614,8 @@ export default function POS() {
           </main>
         )}
 
-        {/* VENTANA MODAL (FORMULARIO CRUD PRODUCTOS) */}
-        {isModalOpen && (
+        {/* VENTANA MODAL (FORMULARIO CRUD PRODUCTOS - SOLO ADMIN) */}
+        {isModalOpen && isAdmin && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
               
@@ -571,6 +663,72 @@ export default function POS() {
                   <button type="button" onClick={handleCloseModal} className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-colors">Cancelar</button>
                   <button type="submit" className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
                     <Save className="w-4 h-4"/> Guardar
+                  </button>
+                </div>
+              </form>
+
+            </div>
+          </div>
+        )}
+
+        {/* VENTANA MODAL (REGISTRO DE NUEVO USUARIO / CAJERO - SOLO ADMIN) */}
+        {isUserModalOpen && isAdmin && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+              
+              <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50">
+                <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-blue-600" />
+                  Registrar Usuario / Cajero
+                </h3>
+                <button onClick={() => setIsUserModalOpen(false)} className="text-slate-400 hover:text-slate-700 bg-white p-1 rounded-md shadow-sm border">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateUser} className="p-6 space-y-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">Nombre de Usuario</label>
+                  <input
+                    required
+                    type="text"
+                    value={userFormData.username}
+                    onChange={(e) => setUserFormData({ ...userFormData, username: e.target.value })}
+                    className="w-full bg-slate-100 border-transparent rounded-lg px-3 py-2 text-sm focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                    placeholder="Ej. cajero2"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">Contraseña</label>
+                  <input
+                    required
+                    type="password"
+                    value={userFormData.password}
+                    onChange={(e) => setUserFormData({ ...userFormData, password: e.target.value })}
+                    className="w-full bg-slate-100 border-transparent rounded-lg px-3 py-2 text-sm focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                    placeholder="••••••••"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">Rol en el Sistema</label>
+                  <select
+                    value={userFormData.role}
+                    onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value })}
+                    className="w-full bg-slate-100 border-transparent rounded-lg px-3 py-2 text-sm focus:bg-white focus:border-blue-500 focus:ring-2 outline-none"
+                  >
+                    <option value="cajero">Cajero (Solo cobro en caja)</option>
+                    <option value="admin">Administrador (Control total)</option>
+                  </select>
+                </div>
+
+                <div className="pt-4 flex gap-3">
+                  <button type="button" onClick={() => setIsUserModalOpen(false)} className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-colors">
+                    Cancelar
+                  </button>
+                  <button type="submit" className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2">
+                    <Save className="w-4 h-4" /> Crear Cuenta
                   </button>
                 </div>
               </form>

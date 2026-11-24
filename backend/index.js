@@ -13,6 +13,11 @@ const saleRoutes = require('./routes/saleRoutes');
 app.use('/api/products', productRoutes);
 app.use('/api/sales', saleRoutes);
 
+const authRoutes = require('./routes/authRoutes');
+const { seedDefaultUsers } = require('./controllers/authController');
+
+app.use('/api/auth', authRoutes);
+
 // ----------------------------
 
 const PORT = process.env.PORT || 3000;
@@ -24,6 +29,7 @@ mongoose.connect(MONGO_URI, {
 })
   .then(() => {
     console.log('🔥 Conectado exitosamente a MongoDB Atlas');
+    seedDefaultUsers();
     app.listen(PORT, () => {
       console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
     });

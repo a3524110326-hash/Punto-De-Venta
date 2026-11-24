@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { verifyToken, isAdmin } = require('../middleware/authMiddleware');
 const { 
   getProducts, 
   createProduct, 
@@ -7,12 +8,12 @@ const {
   deleteProduct 
 } = require('../controllers/productController');
 
-// Rutas base: /api/products
+// Ruta pública (Cajeros y Admins pueden ver el catálogo)
 router.get('/', getProducts);
-router.post('/', createProduct);
 
-// Rutas con ID: /api/products/:id
-router.put('/:id', updateProduct);
-router.delete('/:id', deleteProduct);
+// Rutas protegidas (Solo Administradores pueden crear, editar o eliminar)
+router.post('/', verifyToken, isAdmin, createProduct);
+router.put('/:id', verifyToken, isAdmin, updateProduct);
+router.delete('/:id', verifyToken, isAdmin, deleteProduct);
 
 module.exports = router;
